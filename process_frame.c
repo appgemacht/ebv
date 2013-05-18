@@ -11,52 +11,92 @@
 #include "template.h"
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 
 OSC_ERR OscVisDrawBoundingBoxBW(struct OSC_PICTURE *picIn, struct OSC_VIS_REGIONS *regions, uint8 Color);
 
 void ProcessFrame(uint8 *pInputImg)
 {
-	int c, r;
+	int c; // column index
+	int r; // row index
+	int i; // point index
+	int K; // possible threshold
+	int W0; // number of points in class 0
+	int W1; // number of points in class 1
+	int M0; // sum of point values in class 0
+	int M1; // sum of point values in class 1
+	float Var; // inter class variance
+	float MaxVar; // maximal inter class variance
+	int Threshold; // threshold with maximal inter class variance
+
 	int nc = OSC_CAM_MAX_IMAGE_WIDTH/2;
 	int siz = sizeof(data.u8TempImage[GRAYSCALE]);
-
-	int Shift = 7;
-	short Beta = 2;//the meaning is that in floating point the value of Beta is = 6/(1 << Shift) = 6/128 = 0.0469
-	uint8 MaxForeground = 120;//the maximum foreground counter value (at 15 fps this corresponds to less than 10s)
 
 	struct OSC_PICTURE Pic1, Pic2;//we require these structures to use Oscar functions
 	struct OSC_VIS_REGIONS ImgRegions;//these contain the foreground objects
 
-	if(data.ipc.state.nStepCounter == 1)
-	{
-		/* this is the first time we call this function */
-		/* first time we call this; index 1 always has the background image */
-		memcpy(data.u8TempImage[BACKGROUND], data.u8TempImage[GRAYSCALE], sizeof(data.u8TempImage[GRAYSCALE]));
-		/* set foreground counter to zero */
-		memset(data.u8TempImage[FGRCOUNTER], 0, sizeof(data.u8TempImage[FGRCOUNTER]));
+	uint32 Hist[256];
+	uint8* p;
+
+	if(data.ipc.state.nThreshold != 0) { /* manual threshold */
+		Threshold = data.ipc.state.nThreshold * 255 / 100;
+		OscLog(INFO, "Manual Threshold: %d\n", Threshold);
 	}
-	else
-	{
+	else { /* automatic threshold */
+		/* get grayscale histogram */
+		p = data.u8TempImage[GRAYSCALE];
+		memset(Hist, 0, sizeof(Hist));
+
+		for(i = 0; i < siz; i++) {
+			Hist[p[i]] += 1;
+		}
+
+		/* OscLog(INFO, "Histogram%d = [", data.ipc.state.nStepCounter);
+		for(i = 0; i < 256; i++) {
+			OscLog(INFO, "%d ", Hist[i]);
+		}
+		OscLog(INFO, "]\n"); */
+
+		Threshold = 64;
+		MaxVar = 0;
+		for(K = 0; K < 256; K++) {
+			W0 = 0;
+			M0 = 0;
+			for(i = 0; i < K; i++) {
+				// count points in class 0
+				W0 += Hist[i];
+				// sum point values in class 0
+				M0 += Hist[i]*i;
+			}
+
+			W1 = 0;
+			M1 = 0;
+			for(i = K; i < 256; i++) {
+				// count points in class 1
+				W1 += Hist[i];
+				// sum point values in class 1
+				M1 += Hist[i]*i;
+			}
+
+			// calculate inter class variance
+			Var = W0 * W1 * pow(M0 / (float) W0 - M1 / (float) W1, 2.0);
+
+			if(Var > MaxVar) {
+				MaxVar = Var;
+				Threshold = K;
+			}
+		}
+		OscLog(INFO, "Automatic Threshold: %d; MaxVar: %f\n", Threshold, MaxVar);
+
 		/* this is the default case */
 		for(r = 0; r < siz; r+= nc)/* we strongly rely on the fact that them images have the same size */
 		{
 			for(c = 0; c < nc; c++)
 			{
 				/* first determine the foreground estimate */
-				data.u8TempImage[THRESHOLD][r+c] = (short) data.u8TempImage[GRAYSCALE][r+c] < data.ipc.state.nThreshold ? 0xff : 0;
+				data.u8TempImage[THRESHOLD][r+c] = (short) data.u8TempImage[GRAYSCALE][r+c] < Threshold ? 0xff : 0;
 			}
 		}
-
-		/*
-		{
-			//for debugging purposes we log the background values to console out
-			//we chose the center pixel of the image (adaption to other pixel is straight forward)
-			int offs = nc*(OSC_CAM_MAX_IMAGE_HEIGHT/2)/2+nc/2;
-
-			OscLog(INFO, "%d %d %d %d %d\n", (int) data.u8TempImage[GRAYSCALE][offs], (int) data.u8TempImage[BACKGROUND][offs], (int) data.u8TempImage[BACKGROUND][offs]-data.ipc.state.nThreshold,
-											 (int) data.u8TempImage[BACKGROUND][offs]+data.ipc.state.nThreshold, (int) data.u8TempImage[FGRCOUNTER][offs]);
-		}
-		*/
 
 		for(r = nc; r < siz-nc; r+= nc)/* we skip the first and last line */
 		{
