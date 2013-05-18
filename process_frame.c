@@ -43,36 +43,7 @@ void ProcessFrame(uint8 *pInputImg)
 			for(c = 0; c < nc; c++)
 			{
 				/* first determine the foreground estimate */
-				data.u8TempImage[THRESHOLD][r+c] = abs((short) data.u8TempImage[GRAYSCALE][r+c]-(short) data.u8TempImage[BACKGROUND][r+c]) < data.ipc.state.nThreshold ? 0 : 0xff;
-
-				/* now depending on the foreground estimate ... */
-				if(data.u8TempImage[THRESHOLD][r+c]) {
-					/* ... either in case foreground is detected -> do not update the background but increase the foreground counter */
-					if(data.u8TempImage[FGRCOUNTER][r+c] < MaxForeground) {
-						data.u8TempImage[FGRCOUNTER][r+c]++;
-					} else {
-						/* if counter reaches max -> set current image to background */
-						data.u8TempImage[FGRCOUNTER][r+c] = 0;
-						data.u8TempImage[BACKGROUND][r+c] = data.u8TempImage[GRAYSCALE][r+c];
-					}
-				} else {/* ...or in case background is detected -> decrease foreground counter and update background as usual */					
-					if(0 < data.u8TempImage[FGRCOUNTER][r+c]) {
-						data.u8TempImage[FGRCOUNTER][r+c]--;
-					}
-					/* now update the background image; the value of background should be corrected by the following difference (* 1/128) */
-					short Diff = Beta*((short) data.u8TempImage[GRAYSCALE][r+c] - (short) data.u8TempImage[BACKGROUND][r+c]);
-
-					if(abs(Diff) >= 128) //we will have a correction - apply it (this also avoids the "bug" that -1 >> 1 = -1)
-						data.u8TempImage[BACKGROUND][r+c] = (uint8) ((short) data.u8TempImage[BACKGROUND][r+c] + (Diff >> Shift));//first cast to (short) because Diff can be negative then cast to uint8
-																																  //we do no explicit min(255, max(0, ** )) statement; this should not happen
-					else //due to the division by 128 the correction would be zero -> thus add/subtract at least unity
-					{
-						if(Diff > 0 && data.u8TempImage[BACKGROUND][r+c] < 255)
-								data.u8TempImage[BACKGROUND][r+c] += 1;
-						else if(Diff < 0 && data.u8TempImage[BACKGROUND][r+c] > 1)
-								data.u8TempImage[BACKGROUND][r+c] -= 1;
-					}
-				}
+				data.u8TempImage[THRESHOLD][r+c] = (short) data.u8TempImage[GRAYSCALE][r+c] < data.ipc.state.nThreshold ? 0xff : 0;
 			}
 		}
 
